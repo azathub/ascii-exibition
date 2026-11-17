@@ -8,6 +8,10 @@ and added to the regular exhibition playlist. Fifteen additional, original
 generative patterns are under **Generative art**. The Asciitopia weather scene
 uses its offline demo and makes no network requests.
 
+Every animation has a stable, one-based index shown in the picker and playlist.
+Enter an index (for example, `25` or `#25`) in the animation search field to
+find that animation.
+
 The [Asciitopia core patterns](https://github.com/flawnn/asciitopia) are bundled
 locally for static hosting with `npm run build:asciitopia`.
 

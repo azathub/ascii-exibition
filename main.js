@@ -306,18 +306,23 @@ function renderConfigPanel() {
   const colorMode = options.colorMode || (options.mono ? "mono" : "palette");
 
   const playlistItems = CONFIG.PIECES.length
-    ? CONFIG.PIECES.map(
-        (piece, index) => `
+    ? CONFIG.PIECES.map((piece, index) => {
+        const catalogIndex = PIECE_CATALOG.findIndex(
+          (item) => item.slug === piece,
+        );
+        const pieceNumber = catalogIndex >= 0 ? `${catalogIndex + 1}. ` : "";
+        const pieceName = PIECE_CATALOG[catalogIndex]?.name || piece;
+        return `
           <div class="playlist-item">
-            <span>${escapeHtml(PIECE_CATALOG.find((item) => item.slug === piece)?.name || piece)}</span>
+            <span>${pieceNumber}${escapeHtml(pieceName)}</span>
             <div class="playlist-actions">
               <button type="button" data-action="move-up" data-index="${index}" aria-label="Move ${escapeHtml(piece)} up">↑</button>
               <button type="button" data-action="move-down" data-index="${index}" aria-label="Move ${escapeHtml(piece)} down">↓</button>
               <button type="button" class="danger" data-action="remove-piece" data-index="${index}" aria-label="Remove ${escapeHtml(piece)}">Remove</button>
             </div>
           </div>
-        `,
-      ).join("")
+        `;
+      }).join("")
     : '<div class="empty-playlist">Your playlist is empty.</div>';
 
   configPanel.innerHTML = `
@@ -357,7 +362,7 @@ function renderConfigPanel() {
         </label>
         <label>
           Find an animation
-          <input id="piece-search" type="search" placeholder="Name, tag, or description" />
+          <input id="piece-search" type="search" placeholder="Name, tag, or index (e.g. #25)" />
         </label>
         <label>
           Animation
@@ -564,10 +569,13 @@ function updatePieceOptions() {
   const query = (document.getElementById("piece-search")?.value || "")
     .trim()
     .toLowerCase();
+  const numericQuery = query.match(/^#?(\d+)$/);
+  const requestedIndex = numericQuery ? Number(numericQuery[1]) : null;
   const current = picker.value;
-  const filtered = PIECE_CATALOG.filter((piece) => {
+  const filtered = PIECE_CATALOG.filter((piece, index) => {
     if (category && piece.category !== category) return false;
     if (!query) return true;
+    if (requestedIndex !== null) return index + 1 === requestedIndex;
     return [piece.name, piece.slug, piece.note, ...(piece.tags || [])]
       .join(" ")
       .toLowerCase()
@@ -575,10 +583,10 @@ function updatePieceOptions() {
   });
 
   picker.innerHTML = `<option value="">Choose...</option>${filtered
-    .map(
-      (piece) =>
-        `<option value="${escapeHtml(piece.slug)}">${escapeHtml(piece.name)}</option>`,
-    )
+    .map((piece) => {
+      const index = PIECE_CATALOG.indexOf(piece);
+      return `<option value="${escapeHtml(piece.slug)}">${index + 1}. ${escapeHtml(piece.name)}</option>`;
+    })
     .join("")}`;
   if (filtered.some((piece) => piece.slug === current)) picker.value = current;
 
