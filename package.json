@@ -1,5 +1,12 @@
 {
+  "scripts": {
+    "build:asciitopia": "esbuild asciitopia.js --bundle --format=esm --outfile=vendor/asciitopia.bundle.js"
+  },
   "dependencies": {
+    "@asciitopia/core": "^0.2.1",
     "ascii-magic-art": "^1.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

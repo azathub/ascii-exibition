@@ -1,3 +1,15 @@
+import {
+  ASCIITOPIA_PIECES,
+  CanvasEngine,
+  createAsciitopiaPattern,
+  isAsciitopiaPiece,
+} from "./vendor/asciitopia.bundle.js?v=2";
+import {
+  GENERATIVE_PIECES,
+  createGenerativePattern,
+  isGenerativePiece,
+} from "./exhibition-patterns.js?v=2";
+
 const STORAGE_KEY = "ascii-exhibition-config-v1";
 const CONFIG_VERSION = 2;
 const BRAND_COLOR = "#4b74ff";
@@ -52,6 +64,7 @@ let appearancePreviewTimer = null;
 let libraryPromise = null;
 let galleryRunId = 0;
 let previewPieceName = null;
+let patternEngine = null;
 
 const stage = document.getElementById("stage");
 const configPanel = document.getElementById("config-panel");
@@ -420,6 +433,7 @@ function renderConfigPanel() {
         <label>Library script URL<input id="lib-url" type="text" value="${escapeHtml(CONFIG.LIB_URL)}" /></label>
         <div class="library-note">Animations and catalog are bundled locally for offline playback.</div>
       </section>
+
     </div>
 
     <footer class="panel-actions">
@@ -642,7 +656,13 @@ window.addEventListener("keydown", (event) => {
 });
 
 function showPiece(pieceName) {
+  stopPatternEngine();
   stage.innerHTML = "";
+  if (isCanvasPattern(pieceName)) {
+    showCanvasPattern(pieceName);
+    return;
+  }
+
   const el = document.createElement("ascii-art");
   const options = CONFIG.OPTIONS || DEFAULT_LIBRARY_OPTIONS;
   const size = options.fitToScreen
@@ -684,6 +704,48 @@ function showPiece(pieceName) {
   stage.appendChild(el);
 }
 
+function isCanvasPattern(pieceName) {
+  return isAsciitopiaPiece(pieceName) || isGenerativePiece(pieceName);
+}
+
+function stopPatternEngine() {
+  patternEngine?.destroy();
+  patternEngine = null;
+}
+
+function scalePatternSpeed(pattern, speed) {
+  if (speed === 1) return pattern;
+  return {
+    init: (...args) => pattern.init(...args),
+    update: (dt) => pattern.update(dt * speed),
+    render: (...args) => pattern.render(...args),
+    dispose: () => pattern.dispose?.(),
+  };
+}
+
+function showCanvasPattern(pieceName) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "exhibition-canvas";
+  canvas.setAttribute("aria-label", "Animated ASCII pattern");
+  stage.style.background = CONFIG.OPTIONS.bg || "";
+  stage.appendChild(canvas);
+
+  const pixelRatio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(stage.clientWidth * pixelRatio);
+  canvas.height = Math.round(stage.clientHeight * pixelRatio);
+  patternEngine = new CanvasEngine(canvas, {
+    font: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontSize: (CONFIG.OPTIONS.fitToScreen ? 16 : CONFIG.OPTIONS.size) * pixelRatio,
+  });
+  const pattern = isAsciitopiaPiece(pieceName)
+    ? createAsciitopiaPattern(pieceName)
+    : createGenerativePattern(pieceName);
+  patternEngine.setPattern(
+    scalePatternSpeed(pattern, CONFIG.OPTIONS.speed),
+  );
+  patternEngine.start();
+}
+
 function getFittedPieceSize(pieceName) {
   const piece = PIECE_CATALOG.find((item) => item.slug === pieceName);
   if (!piece?.cols || !piece?.rows) return CONFIG.OPTIONS.size;
@@ -707,6 +769,16 @@ function getFittedPieceSize(pieceName) {
 
 let resizeFrame = 0;
 window.addEventListener("resize", () => {
+  if (patternEngine) {
+    const canvas = stage.querySelector(".exhibition-canvas");
+    if (!canvas) return;
+    const pixelRatio = window.devicePixelRatio || 1;
+    patternEngine.resize(
+      Math.round(stage.clientWidth * pixelRatio),
+      Math.round(stage.clientHeight * pixelRatio),
+    );
+    return;
+  }
   if (!CONFIG.OPTIONS.fitToScreen) return;
   cancelAnimationFrame(resizeFrame);
   resizeFrame = requestAnimationFrame(() => {
@@ -743,6 +815,10 @@ function previewPiece(pieceName) {
   galleryRunId += 1;
   clearTimers();
   previewPieceName = pieceName;
+  if (isCanvasPattern(pieceName)) {
+    showPiece(pieceName);
+    return;
+  }
   loadLibrary()
     .then(() => {
       if (previewPieceName === pieceName) showPiece(pieceName);
@@ -759,26 +835,36 @@ function startGallery() {
   previewPieceName = null;
   const runId = ++galleryRunId;
 
-  loadLibrary()
-    .then(() => {
-      if (runId !== galleryRunId) return;
-      if (CONFIG.PIECES.length === 0) {
-        startFallback();
-        return;
-      }
+  const beginPlayback = () => {
+    if (runId !== galleryRunId) return;
+    if (CONFIG.PIECES.length === 0) {
+      startFallback();
+      return;
+    }
 
-      let i = 0;
-      const show = () => {
-        if (!CONFIG.PIECES.length) return;
-        showPiece(CONFIG.PIECES[i % CONFIG.PIECES.length]);
-      };
+    let i = 0;
+    const show = () => {
+      if (!CONFIG.PIECES.length) return;
+      showPiece(CONFIG.PIECES[i % CONFIG.PIECES.length]);
+    };
 
+    show();
+    galleryTimer = setInterval(() => {
+      i += 1;
       show();
-      galleryTimer = setInterval(() => {
-        i += 1;
-        show();
-      }, CONFIG.PIECE_MS);
-    })
+    }, CONFIG.PIECE_MS);
+  };
+
+  if (
+    CONFIG.PIECES.length > 0 &&
+    CONFIG.PIECES.every((piece) => isCanvasPattern(piece))
+  ) {
+    beginPlayback();
+    return;
+  }
+
+  loadLibrary()
+    .then(beginPlayback)
     .catch((error) => {
       if (runId !== galleryRunId) return;
       console.warn(`${error.message} Using local fallback.`);
@@ -790,6 +876,7 @@ function startGallery() {
    Fallback renderer (vanilla, no dependencies)
    ========================================================= */
 function startFallback() {
+  stopPatternEngine();
   clearTimers();
   stage.style.background = CONFIG.OPTIONS.bg || "";
 
@@ -928,6 +1015,25 @@ async function init() {
     }));
     LIBRARY_CATEGORIES = [];
   }
+
+  const additionalPieces = [...ASCIITOPIA_PIECES, ...GENERATIVE_PIECES];
+  const existingPieceSlugs = new Set(PIECE_CATALOG.map((piece) => piece.slug));
+  PIECE_CATALOG.push(
+    ...additionalPieces.filter((piece) => !existingPieceSlugs.has(piece.slug)),
+  );
+  const additionalCategories = [
+    { id: "asciitopia", name: "Asciitopia" },
+    { id: "generative", name: "Generative art" },
+  ];
+  const existingCategoryIds = new Set(
+    LIBRARY_CATEGORIES.map((category) => category.id),
+  );
+  LIBRARY_CATEGORIES.push(
+    ...additionalCategories.filter(
+      (category) => !existingCategoryIds.has(category.id),
+    ),
+  );
+  AVAILABLE_PIECES = PIECE_CATALOG.map((piece) => piece.slug);
 
   loadSavedConfig();
   CONFIG.PIECES = sanitizePieceList(CONFIG.PIECES);
