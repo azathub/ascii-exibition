@@ -3,7 +3,7 @@ import {
   CanvasEngine,
   createAsciitopiaPattern,
   isAsciitopiaPiece,
-} from "./vendor/asciitopia.bundle.js?v=2";
+} from "./vendor/asciitopia.bundle.js?v=3";
 import {
   GENERATIVE_PIECES,
   createGenerativePattern,
@@ -666,13 +666,17 @@ window.addEventListener("keydown", (event) => {
 function showPiece(pieceName) {
   stopPatternEngine();
   stage.innerHTML = "";
+  const piece = PIECE_CATALOG.find((item) => item.slug === pieceName);
+  const options = CONFIG.OPTIONS || DEFAULT_LIBRARY_OPTIONS;
+  const fillsScreen =
+    options.fitToScreen && piece?.category === "algorithms";
+  stage.style.padding = fillsScreen ? "0" : "";
   if (isCanvasPattern(pieceName)) {
     showCanvasPattern(pieceName);
     return;
   }
 
   const el = document.createElement("ascii-art");
-  const options = CONFIG.OPTIONS || DEFAULT_LIBRARY_OPTIONS;
   const size = options.fitToScreen
     ? getFittedPieceSize(pieceName)
     : options.size;
@@ -757,6 +761,7 @@ function showCanvasPattern(pieceName) {
 function getFittedPieceSize(pieceName) {
   const piece = PIECE_CATALOG.find((item) => item.slug === pieceName);
   if (!piece?.cols || !piece?.rows) return CONFIG.OPTIONS.size;
+  const fillsScreen = piece.category === "algorithms";
 
   const styles = getComputedStyle(stage);
   const availableWidth =
@@ -769,10 +774,18 @@ function getFittedPieceSize(pieceName) {
     parseFloat(styles.paddingBottom);
   const cellWidth = 0.602;
   const cellAspect = piece.cell === "square" ? 1 : 1 / cellWidth;
-  const widthSize = (availableWidth * 0.94) / (piece.cols * cellWidth);
+  const widthSize =
+    (availableWidth * (fillsScreen ? 1 : 0.94)) / (piece.cols * cellWidth);
   const heightSize =
-    (availableHeight * 0.94) / (piece.rows * cellWidth * cellAspect);
-  return Math.max(1, Math.floor(Math.min(widthSize, heightSize) * 10) / 10);
+    (availableHeight * (fillsScreen ? 1 : 0.94)) /
+    (piece.rows * cellWidth * cellAspect);
+  const fittedSize = fillsScreen
+    ? Math.max(widthSize, heightSize)
+    : Math.min(widthSize, heightSize);
+  const roundedSize = fillsScreen
+    ? Math.ceil(fittedSize * 10) / 10
+    : Math.floor(fittedSize * 10) / 10;
+  return Math.max(1, roundedSize);
 }
 
 let resizeFrame = 0;

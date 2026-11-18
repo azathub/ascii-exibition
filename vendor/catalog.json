@@ -3542,23 +3542,6 @@
       "cell": ""
     },
     {
-      "slug": "weather-city-widget",
-      "name": "Weather City Widget",
-      "category": "screens",
-      "note": "A weather widget that slides from city to city, each with an animated sky icon, hourly temperatures and a five day outlook.",
-      "tags": [
-        "weather",
-        "widget",
-        "forecast",
-        "app",
-        "dashboard"
-      ],
-      "params": {},
-      "cols": 66,
-      "rows": 22,
-      "cell": ""
-    },
-    {
       "slug": "window-tiling-manager",
       "name": "Window Tiling Manager",
       "category": "screens",

@@ -1,13 +1,11 @@
 import {
   AuroraPattern,
-  BonsaiPattern,
   CanvasEngine,
   FirePattern,
   RainPattern,
   SnowPattern,
   WavePattern,
 } from "@asciitopia/core";
-import { WeatherPattern } from "@asciitopia/core/weather";
 
 const PATTERNS = [
   {
@@ -39,18 +37,6 @@ const PATTERNS = [
     name: "Aurora",
     note: "Northern lights shifting through drifting fractal noise.",
     create: () => new AuroraPattern(),
-  },
-  {
-    slug: "asciitopia-bonsai",
-    name: "Bonsai",
-    note: "A windswept tree grows limb by limb as the garden changes seasons.",
-    create: () => new BonsaiPattern(),
-  },
-  {
-    slug: "asciitopia-weather",
-    name: "Weather",
-    note: "A cabin scene cycling through changing weather in an offline demo.",
-    create: () => new WeatherPattern(),
   },
 ];
 
