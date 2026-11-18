@@ -1,18 +1,21 @@
-import {
-  ASCIITOPIA_PIECES,
-  CanvasEngine,
-  createAsciitopiaPattern,
-  isAsciitopiaPiece,
-} from "./vendor/asciitopia.bundle.js?v=3";
+import { AsciiPatternEngine } from "./ascii-pattern-engine.js?v=1";
 import {
   GENERATIVE_PIECES,
   createGenerativePattern,
   isGenerativePiece,
-} from "./exhibition-patterns.js?v=2";
+} from "./exhibition-patterns.js?v=4";
 
 const STORAGE_KEY = "ascii-exhibition-config-v1";
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const BRAND_COLOR = "#4b74ff";
+const FULL_SCREEN_PIECES = new Set([
+  "lava-cracks",
+  "metaballs",
+  "plasma",
+  "rotozoomer",
+  "starburst",
+  "tunnel",
+]);
 const DEFAULT_AVAILABLE_PIECES = [
   "abu-simbel-colossi",
   "acropolis-hill-dusk",
@@ -26,19 +29,9 @@ const DEFAULT_AVAILABLE_PIECES = [
 
 const DEFAULT_LIBRARY_OPTIONS = {
   speed: 1,
-  still: false,
   fitToScreen: true,
   size: 12,
-  bg: "",
   look: "",
-  chars: "",
-  mono: false,
-  colorMode: "palette",
-  contrast: 0,
-  dotSize: 51,
-  density: 131,
-  steps: "",
-  all: false,
 };
 
 const DEFAULT_CONFIG = {
@@ -55,12 +48,9 @@ const DEFAULT_CONFIG = {
 let CONFIG = { ...DEFAULT_CONFIG };
 let AVAILABLE_PIECES = [...DEFAULT_AVAILABLE_PIECES];
 let PIECE_CATALOG = [];
-let LIBRARY_CATEGORIES = [];
 let editingPieceParamSlug = null;
-let activePanelTab = "playlist";
 let galleryTimer = null;
 let fallbackTimer = null;
-let appearancePreviewTimer = null;
 let libraryPromise = null;
 let galleryRunId = 0;
 let previewPieceName = null;
@@ -68,6 +58,10 @@ let patternEngine = null;
 
 const stage = document.getElementById("stage");
 const configPanel = document.getElementById("config-panel");
+
+function shouldCoverStage(piece) {
+  return piece?.category === "algorithms" || FULL_SCREEN_PIECES.has(piece?.slug);
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
@@ -111,19 +105,8 @@ function loadSavedConfig() {
         : {};
     const options = {
       ...DEFAULT_LIBRARY_OPTIONS,
-      ...savedOptions,
-      colorMode:
-        savedOptions.colorMode || (savedOptions.mono ? "mono" : "palette"),
+      look: typeof savedOptions.look === "string" ? savedOptions.look : "",
     };
-
-    if (
-      (Number(parsed.VERSION) || 1) < CONFIG_VERSION &&
-      savedOptions.mono === true &&
-      savedOptions.bg === "#ffffff"
-    ) {
-      options.mono = false;
-      options.bg = "";
-    }
 
     CONFIG = {
       ...DEFAULT_CONFIG,
@@ -217,93 +200,10 @@ function saveSelectedPieceParams() {
   CONFIG.PIECE_PARAMS[piece.slug] = params;
 }
 
-function readLibraryOptions() {
-  const value = (id) => document.getElementById(id)?.value ?? "";
-  const checked = (id) => Boolean(document.getElementById(id)?.checked);
-  return {
-    speed: Math.max(0.1, Number(value("option-speed")) || 1),
-    still: checked("option-still"),
-    fitToScreen: checked("option-fit-to-screen"),
-    size: Math.max(1, Number(value("option-size")) || 12),
-    bg: value("option-bg").trim(),
-    look: value("option-look"),
-    chars: value("option-chars"),
-    mono:
-      document.querySelector('input[name="option-color-mode"]:checked')
-        ?.value !== "palette",
-    colorMode:
-      document.querySelector('input[name="option-color-mode"]:checked')
-        ?.value || "palette",
-    contrast: Math.min(100, Math.max(0, Number(value("option-contrast")) || 0)),
-    dotSize: Math.min(
-      120,
-      Math.max(25, Number(value("option-dot-size")) || 51),
-    ),
-    density: Math.min(
-      250,
-      Math.max(40, Number(value("option-density")) || 131),
-    ),
-    steps: value("option-steps"),
-    all: checked("option-all"),
-  };
-}
-
-function commitPanelConfig() {
-  const urlInput = document.getElementById("lib-url");
-  const msInput = document.getElementById("piece-ms");
-  const nextUrl = urlInput ? urlInput.value.trim() : DEFAULT_CONFIG.LIB_URL;
-  const nextMs = Number(msInput?.value) || DEFAULT_CONFIG.PIECE_MS;
-
-  CONFIG = {
-    ...CONFIG,
-    LIB_URL: nextUrl || DEFAULT_CONFIG.LIB_URL,
-    PIECE_MS: Math.max(1000, nextMs),
-    OPTIONS: readLibraryOptions(),
-  };
-  saveSelectedPieceParams();
-  saveConfig();
-}
-
-function applyConfigFromPanel() {
-  commitPanelConfig();
-  if (previewPieceName) {
-    showPiece(previewPieceName);
-  } else {
-    startGallery();
-  }
-}
-
-function scheduleAppearancePreview() {
-  clearTimeout(appearancePreviewTimer);
-  appearancePreviewTimer = setTimeout(() => {
-    appearancePreviewTimer = null;
-    commitPanelConfig();
-    const activePiece = stage.querySelector("ascii-art");
-    if (activePiece) showPiece(activePiece.getAttribute("piece"));
-  }, 120);
-}
-
-function resetConfig() {
-  CONFIG = {
-    ...DEFAULT_CONFIG,
-    PIECES: [...DEFAULT_AVAILABLE_PIECES],
-    OPTIONS: { ...DEFAULT_LIBRARY_OPTIONS },
-    PIECE_PARAMS: {},
-  };
-  saveConfig();
-  renderConfigPanel();
-  startGallery();
-}
-
 function renderConfigPanel() {
   if (!configPanel) return;
 
-  const categoryOptions = LIBRARY_CATEGORIES.map(
-    (category) =>
-      `<option value="${escapeHtml(category.id)}">${escapeHtml(category.name)}</option>`,
-  ).join("");
   const options = CONFIG.OPTIONS;
-  const colorMode = options.colorMode || (options.mono ? "mono" : "palette");
 
   const playlistItems = CONFIG.PIECES.length
     ? CONFIG.PIECES.map((piece, index) => {
@@ -337,29 +237,12 @@ function renderConfigPanel() {
       <button type="button" class="panel-close" data-action="close-panel" aria-label="Hide control panel" title="Hide panel (H)">×</button>
     </header>
 
-    <nav class="panel-tabs" role="tablist" aria-label="Control panel sections">
-      <button type="button" role="tab" id="tab-playlist" aria-controls="view-playlist" data-panel-tab="playlist">Playlist <span>${CONFIG.PIECES.length}</span></button>
-      <button type="button" role="tab" id="tab-appearance" aria-controls="view-appearance" data-panel-tab="appearance">Appearance</button>
-      <button type="button" role="tab" id="tab-library" aria-controls="view-library" data-panel-tab="library">Library</button>
-    </nav>
-
-    <div class="panel-views">
-      <section id="view-playlist" class="panel-view" role="tabpanel" aria-labelledby="tab-playlist" data-panel-view="playlist">
+    <section id="view-playlist" class="panel-view" aria-label="Playlist builder">
         <div class="view-heading">
-          <div><h3>Animation playlist</h3><p>Choose, preview, and order the show.</p></div>
-          <div class="playlist-bulk-actions">
-            <button type="button" class="text-button" data-action="select-all">Add all</button>
-            <button type="button" class="text-button danger-text" data-action="clear-playlist" ${CONFIG.PIECES.length ? "" : "disabled"}>Clear playlist</button>
-          </div>
+          <div><h3>Build your playlist</h3><p>Choose animations for your show.</p></div>
         </div>
 
-        <label>
-          Category
-          <select id="category-picker">
-            <option value="">All categories</option>
-            ${categoryOptions}
-          </select>
-        </label>
+        <div class="collection-heading"><strong>All animations</strong><span>${PIECE_CATALOG.length}</span></div>
         <label>
           Find an animation
           <input id="piece-search" type="search" placeholder="Name, tag, or index (e.g. #25)" />
@@ -372,97 +255,46 @@ function renderConfigPanel() {
         <div id="piece-details" class="piece-details"></div>
         <div id="piece-params" class="piece-params"></div>
 
+        <label>
+          Character look
+          <select id="option-look">
+            <option value="" ${options.look === "" ? "selected" : ""}>Piece default</option>
+            <option value="dots" ${options.look === "dots" ? "selected" : ""}>Dots</option>
+            <option value="ascii" ${options.look === "ascii" ? "selected" : ""}>ASCII</option>
+            <option value="dense" ${options.look === "dense" ? "selected" : ""}>Dense</option>
+            <option value="numbers" ${options.look === "numbers" ? "selected" : ""}>Numbers</option>
+            <option value="binary" ${options.look === "binary" ? "selected" : ""}>Binary</option>
+            <option value="letters" ${options.look === "letters" ? "selected" : ""}>Letters</option>
+            <option value="blocks" ${options.look === "blocks" ? "selected" : ""}>Blocks</option>
+            <option value="squares" ${options.look === "squares" ? "selected" : ""}>Squares</option>
+            <option value="lines" ${options.look === "lines" ? "selected" : ""}>Lines</option>
+            <option value="dither" ${options.look === "dither" ? "selected" : ""}>Dither</option>
+          </select>
+        </label>
+
         <div class="playlist-controls">
           <button type="button" data-action="add-piece">Add to playlist</button>
+          <button type="button" class="secondary" data-action="select-all">Add all</button>
         </div>
 
-        <div class="list-heading"><h3>On the playlist</h3><span>${CONFIG.PIECES.length}</span></div>
-        <div class="playlist-list">${playlistItems}</div>
-      </section>
-
-      <section id="view-appearance" class="panel-view" role="tabpanel" aria-labelledby="tab-appearance" data-panel-view="appearance" hidden>
-        <div class="view-heading"><div><h3>Appearance</h3><p>Adjust how the artwork fills the screen.</p></div></div>
-        <div class="form-grid">
-          <label>Animation speed<input id="option-speed" type="number" min="0.1" step="0.1" value="${options.speed}" /></label>
-          <label class="check-setting"><input id="option-fit-to-screen" type="checkbox" ${options.fitToScreen ? "checked" : ""} /> Fit artwork to screen</label>
-          <label>Manual size (px)<input id="option-size" type="number" min="1" value="${options.size}" ${options.fitToScreen ? "disabled" : ""} /></label>
-          <label>Background color<input id="option-bg" type="text" value="${escapeHtml(options.bg)}" placeholder="Piece default" /></label>
-          <label>Character look
-            <select id="option-look">
-              <option value="" ${options.look === "" ? "selected" : ""}>Piece default</option>
-              <option value="dots" ${options.look === "dots" ? "selected" : ""}>Dots</option>
-              <option value="ascii" ${options.look === "ascii" ? "selected" : ""}>ASCII</option>
-              <option value="dense" ${options.look === "dense" ? "selected" : ""}>Dense</option>
-              <option value="numbers" ${options.look === "numbers" ? "selected" : ""}>Numbers</option>
-              <option value="binary" ${options.look === "binary" ? "selected" : ""}>Binary</option>
-              <option value="letters" ${options.look === "letters" ? "selected" : ""}>Letters</option>
-              <option value="blocks" ${options.look === "blocks" ? "selected" : ""}>Blocks</option>
-              <option value="squares" ${options.look === "squares" ? "selected" : ""}>Squares</option>
-              <option value="lines" ${options.look === "lines" ? "selected" : ""}>Lines</option>
-              <option value="dither" ${options.look === "dither" ? "selected" : ""}>Dither</option>
-            </select>
-          </label>
-          <label>Custom characters<input id="option-chars" type="text" value="${escapeHtml(options.chars)}" placeholder="Example: .:-=+*#@" /></label>
-        </div>
-
-        <fieldset class="color-mode-fieldset">
-          <legend>Art color</legend>
-          <div class="color-mode-options">
-            <label class="color-mode-option"><input type="radio" name="option-color-mode" value="palette" ${colorMode === "palette" ? "checked" : ""} /><span class="color-swatch palette-swatch"></span><span>Piece palette</span></label>
-            <label class="color-mode-option"><input type="radio" name="option-color-mode" value="mono" ${colorMode === "mono" ? "checked" : ""} /><span class="color-swatch mono-swatch"></span><span>Monochrome</span></label>
-            <label class="color-mode-option"><input type="radio" name="option-color-mode" value="brand" ${colorMode === "brand" ? "checked" : ""} /><span class="color-swatch brand-swatch"></span><span>Brand blue <code>#4b74ff</code></span></label>
+        <div class="list-heading">
+          <h3>Your playlist</h3>
+          <div class="playlist-bulk-actions">
+            <span>${CONFIG.PIECES.length}</span>
+            <button type="button" class="text-button" data-action="clear-playlist" ${CONFIG.PIECES.length ? "" : "disabled"}>Clear</button>
           </div>
-        </fieldset>
-
-        <details class="advanced-settings">
-          <summary>Advanced rendering</summary>
-          <label class="range-setting">Contrast<input id="option-contrast" type="range" min="0" max="100" value="${options.contrast}" /><output for="option-contrast">${options.contrast}</output></label>
-          <label class="range-setting">Dot size<input id="option-dot-size" type="range" min="25" max="120" value="${options.dotSize}" /><output for="option-dot-size">${options.dotSize}</output></label>
-          <label class="range-setting">Dot density<input id="option-density" type="range" min="40" max="250" value="${options.density}" /><output for="option-density">${options.density}</output></label>
-          <label>Halftone steps
-            <select id="option-steps">
-              <option value="" ${options.steps === "" ? "selected" : ""}>Piece default</option>
-              <option value="0" ${String(options.steps) === "0" ? "selected" : ""}>Smooth</option>
-              <option value="3" ${String(options.steps) === "3" ? "selected" : ""}>3 steps</option>
-              <option value="5" ${String(options.steps) === "5" ? "selected" : ""}>5 steps</option>
-            </select>
-          </label>
-          <label class="check-setting"><input id="option-still" type="checkbox" ${options.still ? "checked" : ""} /> Still frame</label>
-          <label class="check-setting"><input id="option-all" type="checkbox" ${options.all ? "checked" : ""} /> Redraw text and line work</label>
-        </details>
-      </section>
-
-      <section id="view-library" class="panel-view" role="tabpanel" aria-labelledby="tab-library" data-panel-view="library" hidden>
-        <div class="view-heading"><div><h3>Library</h3><p>Playback behavior and local source.</p></div></div>
-        <label>Time per animation (ms)<input id="piece-ms" type="number" min="1000" step="500" value="${CONFIG.PIECE_MS}" /></label>
-        <label>Library script URL<input id="lib-url" type="text" value="${escapeHtml(CONFIG.LIB_URL)}" /></label>
-        <div class="library-note">Animations and catalog are bundled locally for offline playback.</div>
-      </section>
-
-    </div>
-
-    <footer class="panel-actions">
-      <button type="button" data-action="apply">Apply settings</button>
-      <button type="button" class="secondary" data-action="reset">Reset</button>
-    </footer>
+        </div>
+        <div class="playlist-list">${playlistItems}</div>
+    </section>
   `;
 
   const picker = configPanel.querySelector("#piece-picker");
-  const categoryPicker = configPanel.querySelector("#category-picker");
   const searchInput = configPanel.querySelector("#piece-search");
-  const fitToggle = configPanel.querySelector("#option-fit-to-screen");
-  const sizeInput = configPanel.querySelector("#option-size");
-
-  setActivePanelTab(activePanelTab);
   updatePieceOptions();
   const savePieceDraft = () => {
     saveSelectedPieceParams();
     saveConfig();
   };
-  categoryPicker?.addEventListener("change", () => {
-    savePieceDraft();
-    updatePieceOptions();
-  });
   searchInput?.addEventListener("input", () => {
     savePieceDraft();
     updatePieceOptions();
@@ -471,59 +303,32 @@ function renderConfigPanel() {
     savePieceDraft();
     renderPieceDetails();
     if (picker.value) {
-      commitPanelConfig();
       previewPiece(picker.value);
     } else {
       startGallery();
     }
   });
-  fitToggle?.addEventListener("change", () => {
-    if (sizeInput) sizeInput.disabled = fitToggle.checked;
-  });
+  configPanel
+    .querySelector("#option-look")
+    ?.addEventListener("change", (event) => {
+      CONFIG.OPTIONS.look = event.target.value;
+      saveConfig();
+      const activePiece = stage.querySelector("ascii-art");
+      if (activePiece) showPiece(activePiece.getAttribute("piece"));
+    });
   configPanel
     .querySelector('[data-action="add-piece"]')
     ?.addEventListener("click", () => {
-      commitPanelConfig();
+      saveSelectedPieceParams();
+      saveConfig();
       addPieceToPlaylist(picker?.value);
     });
-
-  configPanel.querySelectorAll('input[type="range"]').forEach((input) => {
-    input.addEventListener("input", () => {
-      const output = configPanel.querySelector(`output[for="${input.id}"]`);
-      if (output) output.textContent = output.value = input.value;
-    });
-  });
-
-  configPanel
-    .querySelectorAll(
-      '#view-appearance input:not([type="range"]), #view-appearance select',
-    )
-    .forEach((control) => {
-      const eventName = control.matches(
-        'input[type="text"], input[type="number"]',
-      )
-        ? "input"
-        : "change";
-      control.addEventListener(eventName, scheduleAppearancePreview);
-    });
-
-  configPanel
-    .querySelector('[data-action="apply"]')
-    ?.addEventListener("click", applyConfigFromPanel);
-  configPanel
-    .querySelector('[data-action="reset"]')
-    ?.addEventListener("click", resetConfig);
   configPanel.onclick = (event) => {
     const target =
       event.target instanceof Element
-        ? event.target.closest("[data-panel-tab], [data-action]")
+        ? event.target.closest("[data-action]")
         : null;
     if (!target) return;
-
-    if (target.dataset.panelTab) {
-      setActivePanelTab(target.dataset.panelTab);
-      return;
-    }
 
     const index = Number(target.dataset.index ?? "-1");
     if (target.dataset.action === "close-panel") {
@@ -532,6 +337,7 @@ function renderConfigPanel() {
       CONFIG.PIECES = [...AVAILABLE_PIECES];
       saveConfig();
       renderConfigPanel();
+      startGallery();
     } else if (target.dataset.action === "clear-playlist") {
       CONFIG.PIECES = [];
       saveConfig();
@@ -547,25 +353,10 @@ function renderConfigPanel() {
   };
 }
 
-function setActivePanelTab(tabName) {
-  activePanelTab = tabName;
-  configPanel.querySelectorAll("[data-panel-tab]").forEach((tab) => {
-    const selected = tab.dataset.panelTab === tabName;
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-  });
-  configPanel.querySelectorAll("[data-panel-view]").forEach((view) => {
-    const selected = view.dataset.panelView === tabName;
-    view.hidden = !selected;
-    view.setAttribute("aria-hidden", String(!selected));
-  });
-}
-
 function updatePieceOptions() {
   const picker = document.getElementById("piece-picker");
   if (!picker) return;
 
-  const category = document.getElementById("category-picker")?.value || "";
   const query = (document.getElementById("piece-search")?.value || "")
     .trim()
     .toLowerCase();
@@ -573,7 +364,6 @@ function updatePieceOptions() {
   const requestedIndex = numericQuery ? Number(numericQuery[1]) : null;
   const current = picker.value;
   const filtered = PIECE_CATALOG.filter((piece, index) => {
-    if (category && piece.category !== category) return false;
     if (!query) return true;
     if (requestedIndex !== null) return index + 1 === requestedIndex;
     return [piece.name, piece.slug, piece.note, ...(piece.tags || [])]
@@ -610,11 +400,8 @@ function renderPieceDetails() {
   }
 
   editingPieceParamSlug = piece.slug;
-  const category = LIBRARY_CATEGORIES.find(
-    (item) => item.id === piece.category,
-  );
   details.innerHTML = `
-    <strong>${escapeHtml(category?.name || "Animation")}</strong>
+    <strong>All animations</strong>
     <span>${escapeHtml(piece.note || "")}</span>
   `;
 
@@ -668,8 +455,7 @@ function showPiece(pieceName) {
   stage.innerHTML = "";
   const piece = PIECE_CATALOG.find((item) => item.slug === pieceName);
   const options = CONFIG.OPTIONS || DEFAULT_LIBRARY_OPTIONS;
-  const fillsScreen =
-    options.fitToScreen && piece?.category === "algorithms";
+  const fillsScreen = options.fitToScreen && shouldCoverStage(piece);
   stage.style.padding = fillsScreen ? "0" : "";
   if (isCanvasPattern(pieceName)) {
     showCanvasPattern(pieceName);
@@ -680,32 +466,13 @@ function showPiece(pieceName) {
   const size = options.fitToScreen
     ? getFittedPieceSize(pieceName)
     : options.size;
-  const background = options.bg;
-  const colorMode = options.colorMode || (options.mono ? "mono" : "palette");
-  stage.style.background = background;
+  stage.style.background = "";
   el.setAttribute("piece", pieceName);
   el.setAttribute("speed", String(options.speed));
   el.setAttribute("size", String(size));
-  if (background) el.setAttribute("bg", background);
-  if (options.still) el.setAttribute("still", "");
+  el.setAttribute("brand", "");
   if (options.look) el.setAttribute("look", options.look);
-  if (options.chars) el.setAttribute("chars", options.chars);
-  if (colorMode === "mono") el.setAttribute("mono", "");
-  if (colorMode === "brand") {
-    el.setAttribute("brand", "");
-    el.style.color = BRAND_COLOR;
-  }
-  if (options.all) el.setAttribute("all", "");
-  if (options.contrast !== "") {
-    el.setAttribute("contrast", String(options.contrast));
-  }
-  if (options.dotSize !== "") {
-    el.setAttribute("dot-size", String(options.dotSize));
-  }
-  if (options.density !== "") {
-    el.setAttribute("density", String(options.density));
-  }
-  if (options.steps !== "") el.setAttribute("steps", String(options.steps));
+  el.style.color = BRAND_COLOR;
   for (const [key, value] of Object.entries(
     CONFIG.PIECE_PARAMS[pieceName] || {},
   )) {
@@ -717,7 +484,7 @@ function showPiece(pieceName) {
 }
 
 function isCanvasPattern(pieceName) {
-  return isAsciitopiaPiece(pieceName) || isGenerativePiece(pieceName);
+  return isGenerativePiece(pieceName);
 }
 
 function stopPatternEngine() {
@@ -739,19 +506,17 @@ function showCanvasPattern(pieceName) {
   const canvas = document.createElement("canvas");
   canvas.className = "exhibition-canvas";
   canvas.setAttribute("aria-label", "Animated ASCII pattern");
-  stage.style.background = CONFIG.OPTIONS.bg || "";
+  stage.style.background = "";
   stage.appendChild(canvas);
 
   const pixelRatio = window.devicePixelRatio || 1;
   canvas.width = Math.round(stage.clientWidth * pixelRatio);
   canvas.height = Math.round(stage.clientHeight * pixelRatio);
-  patternEngine = new CanvasEngine(canvas, {
+  patternEngine = new AsciiPatternEngine(canvas, {
     font: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", "Courier New", monospace',
     fontSize: (CONFIG.OPTIONS.fitToScreen ? 16 : CONFIG.OPTIONS.size) * pixelRatio,
   });
-  const pattern = isAsciitopiaPiece(pieceName)
-    ? createAsciitopiaPattern(pieceName)
-    : createGenerativePattern(pieceName);
+  const pattern = createGenerativePattern(pieceName);
   patternEngine.setPattern(
     scalePatternSpeed(pattern, CONFIG.OPTIONS.speed),
   );
@@ -761,7 +526,7 @@ function showCanvasPattern(pieceName) {
 function getFittedPieceSize(pieceName) {
   const piece = PIECE_CATALOG.find((item) => item.slug === pieceName);
   if (!piece?.cols || !piece?.rows) return CONFIG.OPTIONS.size;
-  const fillsScreen = piece.category === "algorithms";
+  const fillsScreen = shouldCoverStage(piece);
 
   const styles = getComputedStyle(stage);
   const availableWidth =
@@ -899,7 +664,7 @@ function startGallery() {
 function startFallback() {
   stopPatternEngine();
   clearTimers();
-  stage.style.background = CONFIG.OPTIONS.bg || "";
+  stage.style.background = "";
 
   const pre = document.createElement("pre");
   pre.id = "fallback";
@@ -1009,9 +774,6 @@ async function init() {
       throw new Error("Animation catalog is empty.");
     }
     PIECE_CATALOG = catalog.pieces;
-    LIBRARY_CATEGORIES = Array.isArray(catalog.categories)
-      ? catalog.categories
-      : [];
     AVAILABLE_PIECES = PIECE_CATALOG.map((piece) => piece.slug);
   } catch (error) {
     console.warn("Falling back to default piece list.", error);
@@ -1034,25 +796,12 @@ async function init() {
       tags: [],
       params: {},
     }));
-    LIBRARY_CATEGORIES = [];
   }
 
-  const additionalPieces = [...ASCIITOPIA_PIECES, ...GENERATIVE_PIECES];
+  const additionalPieces = [...GENERATIVE_PIECES];
   const existingPieceSlugs = new Set(PIECE_CATALOG.map((piece) => piece.slug));
   PIECE_CATALOG.push(
     ...additionalPieces.filter((piece) => !existingPieceSlugs.has(piece.slug)),
-  );
-  const additionalCategories = [
-    { id: "asciitopia", name: "Asciitopia" },
-    { id: "generative", name: "Generative art" },
-  ];
-  const existingCategoryIds = new Set(
-    LIBRARY_CATEGORIES.map((category) => category.id),
-  );
-  LIBRARY_CATEGORIES.push(
-    ...additionalCategories.filter(
-      (category) => !existingCategoryIds.has(category.id),
-    ),
   );
   AVAILABLE_PIECES = PIECE_CATALOG.map((piece) => piece.slug);
 

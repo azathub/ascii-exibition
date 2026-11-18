@@ -123,6 +123,53 @@ class InterferencePattern {
   }
 }
 
+class TravellingWavesPattern {
+  time = 0;
+
+  init() {
+    this.time = 0;
+  }
+
+  update(dt) {
+    this.time += dt / 1000;
+  }
+
+  render(ctx, cols, rows, charW, charH) {
+    const layers = [
+      { center: 0.28, amplitude: 0.1, speed: 1.2, phase: 0, opacity: 0.42 },
+      { center: 0.5, amplitude: 0.14, speed: 0.9, phase: 2.1, opacity: 0.72 },
+      { center: 0.72, amplitude: 0.09, speed: 0.7, phase: 4.2, opacity: 0.54 },
+    ];
+    const lastCol = Math.max(1, cols - 1);
+
+    for (const layer of layers) {
+      for (let col = 0; col < cols; col++) {
+        const progress = col / lastCol;
+        const phase =
+          progress * Math.PI * 4 + this.time * layer.speed + layer.phase;
+        const rowPosition =
+          layer.center * rows +
+          Math.sin(phase) * layer.amplitude * rows +
+          Math.sin(phase * 0.55 - this.time * 0.35) *
+            layer.amplitude *
+            rows *
+            0.3;
+        const centerRow = Math.round(rowPosition);
+
+        for (const offset of [-1, 0, 1]) {
+          const row = centerRow + offset;
+          if (row < 0 || row >= rows) continue;
+
+          const opacity = layer.opacity * (offset === 0 ? 1 : 0.45);
+          const glyph = offset === 0 ? "~" : offset < 0 ? "." : "-";
+          ctx.fillStyle = `rgba(${BRAND_COLOR.join(",")},${opacity.toFixed(2)})`;
+          ctx.fillText(glyph, col * charW, (row + 1) * charH);
+        }
+      }
+    }
+  }
+}
+
 class OrbitalsPattern {
   time = 0;
 
@@ -428,7 +475,7 @@ class BlackHolePattern {
         const radius = Math.hypot(x, y);
         const diskRadius = Math.hypot(x, y * 2.4) / scale;
         if (radius < horizon) {
-          ctx.fillStyle = "#10172d";
+          ctx.fillStyle = `rgba(${BRAND_COLOR.join(",")},0.28)`;
           ctx.fillText(radius < horizon * 0.58 ? "@" : "#", col * charW, (row + 1) * charH);
         } else if (diskRadius > 0.34 && diskRadius < 1.05) {
           const angle = Math.atan2(y, x);
@@ -821,6 +868,12 @@ const PATTERNS = [
     name: "Wave interference",
     note: "Concentric waves overlap to form a moving interference pattern.",
     create: () => new InterferencePattern(),
+  },
+  {
+    slug: "waves",
+    name: "Waves",
+    note: "Layered ASCII waves travel across the screen in a flowing rhythm.",
+    create: () => new TravellingWavesPattern(),
   },
   {
     slug: "orbitals",
